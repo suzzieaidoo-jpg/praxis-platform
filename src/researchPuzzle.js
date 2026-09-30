@@ -474,11 +474,16 @@ export const FINAL_REFLECTION = {
   ]
 };
 
+export const CUSTOM_REASON = ['other','Something else.','You gave a reason that is not represented by the predefined options. Your own explanation should therefore be treated as the primary basis for understanding this decision.'];
+
 export function optionFor(decision, optionId){
   return decision.options.find(o=>o.id===optionId);
 }
+export function reasonsFor(option){
+  return [...option.reasons, CUSTOM_REASON];
+}
 export function reasonFor(option, reasonId){
-  return option.reasons.find(r=>r[0]===reasonId);
+  return reasonsFor(option).find(r=>r[0]===reasonId);
 }
 export function composeFeedback(decision, optionId, reasonId){
   const option=optionFor(decision,optionId);
