@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DECISIONS, composeFeedback } from './researchPuzzle.js';
+import { DECISIONS, composeFeedback, reasonsFor, buildProfile } from './researchPuzzle.js';
 
 describe('Research Puzzle response library', () => {
   it('contains exactly eight decisions', () => {
@@ -26,6 +26,29 @@ describe('Research Puzzle response library', () => {
         }
       }
     }
+  });
+
+  it('provides a participant-defined reason on every option', () => {
+    for (const decision of DECISIONS) {
+      for (const option of decision.options) {
+        expect(reasonsFor(option).some(r => r[0] === 'other')).toBe(true);
+        const feedback = composeFeedback(decision, option.id, 'other');
+        expect(feedback.reason).toContain('primary basis');
+      }
+    }
+  });
+
+  it('generates a profile without an overall score', () => {
+    const records = DECISIONS.map((decision) => ({
+      decisionId: decision.id,
+      optionId: decision.options[0].id,
+      reasonId: decision.options[0].reasons[0][0],
+      reflection: 'test',
+    }));
+    const profile = buildProfile(records, {});
+    expect(profile.score).toBeUndefined();
+    expect(profile.overallScore).toBeUndefined();
+    expect(profile.priorities.length).toBeGreaterThan(0);
   });
 
   it('keeps option and reason ids unique within each decision', () => {
