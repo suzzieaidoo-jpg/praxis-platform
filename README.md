@@ -2,42 +2,73 @@
 
 Participant-facing application for Praxis simulations.
 
-## Research Leadership Lab 01 — The Project
+## Research Leadership Lab 01 — The Research Puzzle
 
-The first cockpit implements the asynchronous ECR research-leadership experience against the `praxis-sim-api` Research Leadership namespace.
+The default experience is a 25–35 minute individual research-development simulation for early career researchers.
 
-### Current UX
-- six-round project frame and timeline
-- qualitative project-health cockpit
-- leadership-attention indicator
-- consequential decision cards
-- decision confidence and rationale capture
-- Learn / Consult / Decide resources
-- embedded reflection modal
-- developmental decision-profile drawer
+Participants work through eight linked research decisions involving:
+
+- developing and revising explanations
+- choosing and combining forms of evidence
+- responding to contradictory information
+- refining a research question
+- identifying evidence that could challenge an explanation
+- considering the circumstances in which an explanation applies
+- matching conclusions to the available evidence
+- deciding what a follow-on study should investigate
+
+Each decision follows the same learning sequence:
+
+**Evidence → Decision → Adaptive reason → Reflection → Tailored feedback → Next evidence**
+
+The simulation deliberately does not produce an overall score, researcher type, rank or competence judgement.
+
+## Response library
+
+`src/researchPuzzle.js` is the single source of truth for:
+
+- all eight decisions
+- every decision option
+- every adaptive reason
+- option-specific and reason-specific feedback
+- next-stage transitions
+- confidence and limitation prompts
+- internal interpretation signals
+- final Research Decision Profile rules
+
+This allows participant feedback to be deterministic and auditable instead of being improvised by a language model.
+
+## Current participant experience
+
+- staged evidence packets
+- eight consequential research decisions
+- adaptive reason selection after every decision
+- optional written reflection
+- confidence capture at selected points
+- conclusion-limitation prompt
+- tailored learning feedback after every decision
+- final cross-simulation reflection
+- deterministic Research Decision Profile
+- transfer prompts back to the participant's own research
 - responsive layout and keyboard focus states
-- local save/resume run identifier
-- demo adapter for UX testing without backend credentials
 
-### Run locally
+## Run locally
 
 ```bash
 npm install
-cp .env.example .env
 npm run dev
 ```
 
-The example environment starts in demo mode. Set `VITE_DEMO_MODE=false`, configure `VITE_API_BASE`, and wire Firebase web authentication before connecting to the protected production API.
+## Validation before pilot
 
-## Production gates
+Before using the simulation as a formal developmental intervention:
 
-Do not expose this publicly until:
-1. Firebase web authentication is wired and ID tokens are passed to the API client.
-2. Backend Research Leadership PR is deployed to a staging Cloud Run revision.
-3. CORS is restricted to the deployed participant origin.
-4. The end-to-end 30-user and 60-user load tests pass.
-5. Save/resume, duplicate-submit, expired-token and network-retry behaviour are browser-tested.
-6. Accessibility review covers keyboard, screen reader, mobile, zoom/reflow and non-colour status meaning.
-7. Scenario content has expert review and ECR cognitive testing.
+1. complete construct/domain expert review;
+2. conduct ECR cognitive interviews across several SHAPE disciplines;
+3. test whether participants interpret the options and feedback as intended;
+4. check that no option is experienced as an obvious 'correct' answer;
+5. review accessibility across keyboard, screen reader, mobile and zoom/reflow;
+6. verify the interpretation rules against participant explanations;
+7. pilot the cohort-level aggregate outputs separately from individual developmental feedback.
 
-The simulation is developmental. It must not present a single leadership score, rank, archetype or claim of validated workplace competence.
+The profile is developmental and refers only to decisions made within this simulation.
