@@ -1,9 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { SIMULATION_META, INITIAL_CONTEXT, DECISIONS, FINAL_REFLECTION, composeFeedback, buildProfile, optionFor, reasonsFor } from './researchPuzzle.js';
+import { PUZZLE_BACKEND_ENABLED, createPuzzleRun, getPuzzleRun, savePuzzleDecision, savePuzzleFinalReflection, getPuzzleProfile, savePuzzleTransfer, normalizeRemoteState } from './puzzleApi.js';
+import { firebaseConfigured } from './auth.js';
 
 function App(){
   const saved = (()=>{try{return JSON.parse(localStorage.getItem('research_puzzle_progress')||'null')}catch{return null}})();
   const [started,setStarted]=useState(saved?.started||false);
+  const [runId,setRunId]=useState(saved?.runId||null);
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState('');
+  const [serverProfile,setServerProfile]=useState(null);
   const [index,setIndex]=useState(saved?.index||0);
   const [phase,setPhase]=useState('decision');
   const [optionId,setOptionId]=useState('');
@@ -22,8 +28,22 @@ function App(){
   const progress=started?Math.round((index/DECISIONS.length)*100):0;
 
   useEffect(()=>{
-    localStorage.setItem('research_puzzle_progress',JSON.stringify({started,index,records,finalReflection}));
-  },[started,index,records,finalReflection]);
+    localStorage.setItem('research_puzzle_progress',JSON.stringify({started,index,records,finalReflection,runId}));
+  },[started,index,records,finalReflection,runId]);
+
+  useEffect(()=>{
+    if(!PUZZLE_BACKEND_ENABLED||!runId) return;
+    let cancelled=false;
+    (async()=>{
+      try{
+        const remote=normalizeRemoteState(await getPuzzleRun(runId));
+        if(cancelled) return;
+        if(remote.records.length>=records.length){setRecords(remote.records);setIndex(Math.min(remote.index,DECISIONS.length-1));}
+        if(remote.finalReflection&&Object.keys(remote.finalReflection).length){setFinalReflection(f=>({...f,...remote.finalReflection}));}
+      }catch(e){if(!cancelled)setError(`Could not restore the secure session: ${e.message}`);}
+    })();
+    return ()=>{cancelled=true;};
+  },[runId]);
 
   function resetDecision(){
     setOptionId(''); setReasonId(''); setReflection(''); setConfidence(4); setLimitation(''); setCustomReason('');
@@ -43,10 +63,18 @@ function App(){
     setPhase('reflection');
   }
 
-  function saveReflection(){
+  async function saveReflection(){
     const rec={decisionId:decision.id,optionId,reasonId,customReason:reasonId==='other'?customReason:null,reflection,confidence:decision.confidence?Number(confidence):null,limitation:decision.limitation?limitation:null};
-    setRecords(prev=>[...prev.filter(r=>r.decisionId!==decision.id),rec]);
-    setPhase('feedback');
+    setBusy(true); setError('');
+    try{
+      if(PUZZLE_BACKEND_ENABLED){
+        if(!runId) throw new Error('No secure run is available.');
+        await savePuzzleDecision(runId,rec);
+      }
+      setRecords(prev=>[...prev.filter(r=>r.decisionId!==decision.id),rec]);
+      setPhase('feedback');
+    }catch(e){setError(e.message);}
+    finally{setBusy(false);}
   }
 
   function nextDecision(){
@@ -60,7 +88,58 @@ function App(){
     window.scrollTo({top:0,behavior:'smooth'});
   }
 
-  const profile=useMemo(()=>buildProfile(records,finalReflection),[records,finalReflection]);
+  const localProfile=useMemo(()=>buildProfile(records,finalReflection),[records,finalReflection]);
+  const profile=serverProfile?{
+    priorities:(serverProfile.priorities||[]).map(x=>typeof x==='string'?x:x.text),
+    strengths:(serverProfile.strengths||[]).map(x=>({title:x.title||'Pattern across your decisions',text:x.text})),
+    developmentOverTime:serverProfile.development_over_time||'',
+    development:serverProfile.consideration?.text||null,
+    finalQuestion:serverProfile.question
+  }:localProfile;
+
+  async function beginSimulation(){
+    setBusy(true);setError('');
+    try{
+      if(PUZZLE_BACKEND_ENABLED){
+        if(!firebaseConfigured) throw new Error('Secure mode is enabled but Firebase is not configured.');
+        if(!runId){
+          const created=await createPuzzleRun();
+          setRunId(created.run_id);
+        }
+      }
+      setStarted(true);
+    }catch(e){setError(e.message);}
+    finally{setBusy(false);}
+  }
+
+  async function openProfile(){
+    setBusy(true);setError('');
+    try{
+      if(PUZZLE_BACKEND_ENABLED){
+        await savePuzzleFinalReflection(runId,finalReflection);
+        setServerProfile(await getPuzzleProfile(runId));
+      }
+      setPhase('profile');
+    }catch(e){setError(e.message);}
+    finally{setBusy(false);}
+  }
+
+  async function saveTransfer(){
+    setBusy(true);setError('');
+    try{
+      if(PUZZLE_BACKEND_ENABLED){
+        await savePuzzleTransfer(runId,{
+          ownResearch:finalReflection.ownResearch,
+          supportingEvidence:finalReflection.supportingEvidence,
+          challengingEvidence:finalReflection.challengingEvidence,
+          alternative:finalReflection.alternative,
+          missing:finalReflection.missing,
+          next:finalReflection.next,
+        });
+      }
+    }catch(e){setError(e.message);}
+    finally{setBusy(false);}
+  }
 
   if(!started){
     return <main className="welcome">
@@ -75,8 +154,10 @@ function App(){
         </div>
         <p>You will receive information in stages and make eight research decisions. At several points, you will be asked why you made a choice before seeing what can be learned from it.</p>
         <p>There is no overall score. Your final Research Decision Profile reflects patterns across your decisions and reflections within this simulation.</p>
-        <button className="primary" onClick={()=>setStarted(true)}>{saved?.started?'Resume the simulation':'Begin the simulation'}</button>
+        <button className="primary" disabled={busy} onClick={beginSimulation}>{busy?'Preparing…':saved?.started?'Resume the simulation':'Begin the simulation'}</button>
         {saved?.started&&<button className="text-button" onClick={()=>{localStorage.removeItem('research_puzzle_progress');location.reload();}}>Start again</button>}
+        {error&&<div className="error" role="alert">{error}</div>}
+        <p className="demo">{PUZZLE_BACKEND_ENABLED?'Secure save is enabled.':'Development mode: progress is stored only in this browser.'}</p>
       </section>
     </main>;
   }
@@ -125,7 +206,8 @@ function App(){
             {finalReflection.changed&&<textarea placeholder={finalReflection.changed==='Yes'?'What changed?':finalReflection.changed==='No'?'What remained consistent?':'Is there a decision you would now approach differently?'} value={finalReflection.changedWhy} onChange={e=>setFinalReflection(f=>({...f,changedWhy:e.target.value}))}/>}
           </Question>
 
-          <button className="primary" onClick={()=>setPhase('profile')}>See my Research Decision Profile</button>
+          <button className="primary" disabled={busy} onClick={openProfile}>{busy?'Preparing profile…':'See my Research Decision Profile'}</button>
+          {error&&<div className="error" role="alert">{error}</div>}
         </section>
       </main>
     </div>;
@@ -168,6 +250,8 @@ function App(){
           <Question title="Is a perspective or form of evidence currently missing?"><textarea value={finalReflection.missing} onChange={e=>setFinalReflection(f=>({...f,missing:e.target.value}))}/></Question>
           <Question title="In the next two weeks, I will…"><textarea value={finalReflection.next} onChange={e=>setFinalReflection(f=>({...f,next:e.target.value}))}/></Question>
 
+          <button className="primary" disabled={busy} onClick={saveTransfer}>{busy?'Saving…':'Save my next step'}</button>
+          {error&&<div className="error" role="alert">{error}</div>}
           <div className="end-note">The purpose of the simulation is to make research decisions more visible so that you can examine the reasoning behind them and consider how similar decisions arise in your own work.</div>
         </section>
       </main>
@@ -234,7 +318,8 @@ function App(){
             </select>
           </Question>}
 
-          <button className="primary" onClick={saveReflection}>See what this decision suggests</button>
+          <button className="primary" disabled={busy} onClick={saveReflection}>{busy?'Saving…':'See what this decision suggests'}</button>
+          {error&&<div className="error" role="alert">{error}</div>}
         </>}
 
         {phase==='feedback'&&feedback&&<>
