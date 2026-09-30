@@ -1,17 +1,19 @@
-import React, { useMemo, useState } from 'react';
-import { SIMULATION_META, INITIAL_CONTEXT, DECISIONS, FINAL_REFLECTION, composeFeedback, buildProfile, optionFor } from './researchPuzzle.js';
+import React, { useEffect, useMemo, useState } from 'react';
+import { SIMULATION_META, INITIAL_CONTEXT, DECISIONS, FINAL_REFLECTION, composeFeedback, buildProfile, optionFor, reasonsFor } from './researchPuzzle.js';
 
 function App(){
-  const [started,setStarted]=useState(false);
-  const [index,setIndex]=useState(0);
+  const saved = (()=>{try{return JSON.parse(localStorage.getItem('research_puzzle_progress')||'null')}catch{return null}})();
+  const [started,setStarted]=useState(saved?.started||false);
+  const [index,setIndex]=useState(saved?.index||0);
   const [phase,setPhase]=useState('decision');
   const [optionId,setOptionId]=useState('');
   const [reasonId,setReasonId]=useState('');
   const [reflection,setReflection]=useState('');
   const [confidence,setConfidence]=useState(4);
   const [limitation,setLimitation]=useState('');
-  const [records,setRecords]=useState([]);
-  const [finalReflection,setFinalReflection]=useState({priorities:[],reconsider:'',difficult:'',difficultWhy:'',recurring:'',changed:'',changedWhy:'',ownResearch:'',supportingEvidence:'',challengingEvidence:'',alternative:'',missing:'',next:''});
+  const [records,setRecords]=useState(saved?.records||[]);
+  const [finalReflection,setFinalReflection]=useState(saved?.finalReflection||{priorities:[],reconsider:'',difficult:'',difficultWhy:'',recurring:'',changed:'',changedWhy:'',ownResearch:'',supportingEvidence:'',challengingEvidence:'',alternative:'',missing:'',next:''});
+  const [customReason,setCustomReason]=useState('');
 
   const decision=DECISIONS[index];
   const option=decision && optionFor(decision,optionId);
@@ -19,8 +21,12 @@ function App(){
   const feedback=decision&&optionId&&reasonId?composeFeedback(decision,optionId,reasonId):null;
   const progress=started?Math.round((index/DECISIONS.length)*100):0;
 
+  useEffect(()=>{
+    localStorage.setItem('research_puzzle_progress',JSON.stringify({started,index,records,finalReflection}));
+  },[started,index,records,finalReflection]);
+
   function resetDecision(){
-    setOptionId(''); setReasonId(''); setReflection(''); setConfidence(4); setLimitation('');
+    setOptionId(''); setReasonId(''); setReflection(''); setConfidence(4); setLimitation(''); setCustomReason('');
   }
 
   function chooseOption(id){
@@ -38,7 +44,7 @@ function App(){
   }
 
   function saveReflection(){
-    const rec={decisionId:decision.id,optionId,reasonId,reflection,confidence:decision.confidence?Number(confidence):null,limitation:decision.limitation?limitation:null};
+    const rec={decisionId:decision.id,optionId,reasonId,customReason:reasonId==='other'?customReason:null,reflection,confidence:decision.confidence?Number(confidence):null,limitation:decision.limitation?limitation:null};
     setRecords(prev=>[...prev.filter(r=>r.decisionId!==decision.id),rec]);
     setPhase('feedback');
   }
@@ -69,7 +75,8 @@ function App(){
         </div>
         <p>You will receive information in stages and make eight research decisions. At several points, you will be asked why you made a choice before seeing what can be learned from it.</p>
         <p>There is no overall score. Your final Research Decision Profile reflects patterns across your decisions and reflections within this simulation.</p>
-        <button className="primary" onClick={()=>setStarted(true)}>Begin the simulation</button>
+        <button className="primary" onClick={()=>setStarted(true)}>{saved?.started?'Resume the simulation':'Begin the simulation'}</button>
+        {saved?.started&&<button className="text-button" onClick={()=>{localStorage.removeItem('research_puzzle_progress');location.reload();}}>Start again</button>}
       </section>
     </main>;
   }
@@ -200,8 +207,9 @@ function App(){
           <h1>Why did you choose this approach?</h1>
           <div className="selected-choice"><strong>Your decision</strong><p>{option.label}</p></div>
           <p className="prompt">Choose the response that comes closest to your reasoning.</p>
-          <div className="reason-list">{option.reasons.map(r=><label className={`reason-option ${reasonId===r[0]?'selected':''}`} key={r[0]}><input type="radio" name="reason" checked={reasonId===r[0]} onChange={()=>setReasonId(r[0])}/><span>{r[1]}</span></label>)}</div>
-          <button className="primary" disabled={!reasonId} onClick={continueFromReason}>Continue</button>
+          <div className="reason-list">{reasonsFor(option).map(r=><label className={`reason-option ${reasonId===r[0]?'selected':''}`} key={r[0]}><input type="radio" name="reason" checked={reasonId===r[0]} onChange={()=>setReasonId(r[0])}/><span>{r[1]}</span></label>)}</div>
+          {reasonId==='other'&&<textarea className="large-textarea" placeholder="Briefly explain the reason for your decision." value={customReason} onChange={e=>setCustomReason(e.target.value)}/>}
+          <button className="primary" disabled={!reasonId||(reasonId==='other'&&customReason.trim().length<5)} onClick={continueFromReason}>Continue</button>
         </>}
 
         {phase==='reflection'&&<>
