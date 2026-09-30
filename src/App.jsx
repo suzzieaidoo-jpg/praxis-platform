@@ -1,50 +1,272 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { DEMO, choose, consult, createRun, currentRun, getLearning, openToolkit, profile, reflect } from './api.js';
-import { ensureAuthenticated, firebaseConfigured, subscribeToAuth } from './auth.js';
+import React, { useMemo, useState } from 'react';
+import { SIMULATION_META, INITIAL_CONTEXT, DECISIONS, FINAL_REFLECTION, composeFeedback, buildProfile, optionFor } from './researchPuzzle.js';
 
-const ROUND_NAMES = ['Design','Commit','Deliver','Adapt','Lead under pressure','Steward'];
-const HEALTH_LABELS = {purpose:'Purpose',scope:'Scope',capacity:'Team capacity',clarity:'Role clarity',trust:'Trust',evidence:'Evidence',time:'Schedule',budget:'Budget',adaptive_reserve:'Adaptive reserve',stakeholder_alignment:'Stakeholder alignment'};
-function Status({value}) { return <span className={`status status-${String(value).toLowerCase()}`}>{value}</span>; }
+function App(){
+  const [started,setStarted]=useState(false);
+  const [index,setIndex]=useState(0);
+  const [phase,setPhase]=useState('decision');
+  const [optionId,setOptionId]=useState('');
+  const [reasonId,setReasonId]=useState('');
+  const [reflection,setReflection]=useState('');
+  const [confidence,setConfidence]=useState(4);
+  const [limitation,setLimitation]=useState('');
+  const [records,setRecords]=useState([]);
+  const [finalReflection,setFinalReflection]=useState({priorities:[],reconsider:'',difficult:'',difficultWhy:'',recurring:'',changed:'',changedWhy:'',ownResearch:'',supportingEvidence:'',challengingEvidence:'',alternative:'',missing:'',next:''});
 
-function App() {
-  const [runId,setRunId]=useState(localStorage.getItem('rl_run_id'));
-  const [run,setRun]=useState(null); const [learning,setLearning]=useState(null); const [drawer,setDrawer]=useState(null);
-  const [selected,setSelected]=useState(''); const [confidence,setConfidence]=useState(4); const [rationale,setRationale]=useState('');
-  const [reflectionText,setReflectionText]=useState(''); const [reflectionPrompt,setReflectionPrompt]=useState('');
-  const [busy,setBusy]=useState(false); const [error,setError]=useState(''); const [showProfile,setShowProfile]=useState(false); const [profileData,setProfileData]=useState(null);
-  const [authReady,setAuthReady]=useState(DEMO); const [participant,setParticipant]=useState(null);
+  const decision=DECISIONS[index];
+  const option=decision && optionFor(decision,optionId);
+  const reason=option?.reasons.find(r=>r[0]===reasonId);
+  const feedback=decision&&optionId&&reasonId?composeFeedback(decision,optionId,reasonId):null;
+  const progress=started?Math.round((index/DECISIONS.length)*100):0;
 
-  useEffect(()=>{
-    if(DEMO){setAuthReady(true);return;}
-    if(!firebaseConfigured){setError('Live mode is enabled but Firebase environment configuration is incomplete.');setAuthReady(true);return;}
-    return subscribeToAuth(user=>{setParticipant(user);setAuthReady(true);});
-  },[]);
+  function resetDecision(){
+    setOptionId(''); setReasonId(''); setReflection(''); setConfidence(4); setLimitation('');
+  }
 
-  async function load(id=runId){ if(!id)return; setBusy(true);setError(''); try{const data=await currentRun(id);setRun(data);if(data.current_decision)setLearning(await getLearning(id,data.current_decision.id));}catch(e){if(/not found/i.test(e.message)){localStorage.removeItem('rl_run_id');setRunId(null);setRun(null);}setError(e.message);}finally{setBusy(false);} }
-  useEffect(()=>{if(authReady&&runId&&(DEMO||participant))load(runId);},[authReady,participant,runId]);
+  function chooseOption(id){
+    setOptionId(id); setReasonId(''); setReflection(''); setLimitation('');
+  }
 
-  async function begin(){setBusy(true);setError('');try{if(!DEMO){const user=await ensureAuthenticated();setParticipant(user);}const created=await createRun();localStorage.setItem('rl_run_id',created.run_id);setRunId(created.run_id);}catch(e){setError(e.message);}finally{setBusy(false);}}
-  async function useToolkit(id){try{const data=await openToolkit(runId,run.current_decision.id,id);setDrawer({type:'Learn',...data.resource});}catch(e){setError(e.message);}}
-  async function useConsult(id,label){try{const data=await consult(runId,run.current_decision.id,id);setRun(r=>({...r,leadership_attention:data.leadership_attention}));setDrawer({type:'Consult',title:label,purpose:'You sought specialist input before deciding. Consultation informs judgement; it does not make the decision for you.',principles:['Clarify the applicable boundary or process.','Return responsibility for the project decision to the Co-Lead.','Record material advice where it changes the project plan.']});}catch(e){setError(e.message);}}
-  async function submitDecision(){if(!selected)return setError('Choose an option before continuing.');setBusy(true);setError('');try{const result=await choose(runId,run.current_decision.id,selected,{confidence:Number(confidence),rationale:rationale||null});setReflectionPrompt(result.reflection_prompt||run.current_decision.reflection||'What do you notice about the judgement you just made?');setReflectionText('');}catch(e){setError(e.message);}finally{setBusy(false);}}
-  async function submitReflection(){setBusy(true);try{await reflect(runId,run.current_decision.id,reflectionText);setReflectionPrompt('');setSelected('');setRationale('');if(!DEMO)await load();}catch(e){setError(e.message);}finally{setBusy(false);}}
-  async function openProfile(){try{setProfileData(await profile(runId));setShowProfile(true);}catch(e){setError(e.message);}}
-  const progress=useMemo(()=>run?Math.round(((run.round||0)/5)*100):0,[run]);
+  function continueFromDecision(){
+    if(!optionId) return;
+    setPhase('reason');
+  }
 
-  if(!authReady)return <main className="loading">Preparing your secure project session…</main>;
-  if(!runId)return <main className="welcome"><div className="welcome-card"><p className="eyebrow">RESEARCH LEADERSHIP LAB 01</p><h1>The Project</h1><p className="lede">Can you lead the research when reality stops following the proposal?</p><p>You are a Co-Lead on a 24-month interdisciplinary project. You will make consequential decisions about scope, people, evidence, partners and opportunity as the project changes around you.</p><div className="principle"><strong>This is not a test of personality.</strong><br/>There is rarely one uncomplicated correct answer. The simulation is designed to help you notice how you make trade-offs under pressure.</div>{error&&<div className="error" role="alert">{error}</div>}<button className="primary" onClick={begin} disabled={busy||(!DEMO&&!firebaseConfigured)}>{busy?'Preparing…':'Begin the project'}</button>{DEMO?<p className="demo">Demo mode · no personal data is being sent</p>:<p className="demo">Secure participant session · your progress can be resumed on this device</p>}</div></main>;
-  if(!run)return <main className="loading">{error?<div className="error" role="alert">{error}</div>:'Loading your project…'}</main>;
-  const d=run.current_decision;
-  return <div className="app-shell"><header className="topbar"><div><p className="eyebrow">RESEARCH LEADERSHIP LAB 01</p><strong>The Project</strong></div><div className="topmeta"><span>Month {run.month}</span><span>Round {(run.round||0)+1}/6 · {ROUND_NAMES[run.round]||'Project'}</span><span className="attention">Leadership attention <b>{run.leadership_attention}/10</b></span></div></header><div className="progress"><div style={{width:`${progress}%`}}/></div><main className="cockpit">
-  <aside className="health-panel"><h2>Project health</h2><p className="muted">Signals, not scores</p>{Object.entries(run.project_health||{}).map(([k,v])=><div className="health-row" key={k}><span>{HEALTH_LABELS[k]||k}</span><Status value={v}/></div>)}<button className="secondary full" onClick={openProfile}>Decision profile</button></aside>
-  <section className="decision-panel"><div className="context"><span className="round-pill">{ROUND_NAMES[run.round]}</span><span>Month {run.month}</span></div><h1>{d?.title||'Project checkpoint'}</h1><p className="scenario">{d?.prompt||'Review the project and decide what requires your attention.'}</p>
-  {learning&&(learning.toolkit?.length||learning.consult?.length)?<div className="learning-strip"><div><strong>Need more information?</strong><span>Learn or consult before deciding. You do not need to use every resource.</span></div><div className="learning-actions">{learning.toolkit?.map(x=><button key={x.id} onClick={()=>useToolkit(x.id)}>Learn · {x.title}</button>)}{learning.consult?.map(x=><button key={x.id} onClick={()=>useConsult(x.id,x.label)}>Consult · {x.label}</button>)}</div></div>:null}
-  <fieldset className="options"><legend>What will you do?</legend>{d?.options?.map(o=><label className={`option ${selected===o.id?'selected':''}`} key={o.id}><input type="radio" name="decision" value={o.id} checked={selected===o.id} onChange={()=>setSelected(o.id)}/><span>{o.label}</span></label>)}</fieldset>
-  <div className="decision-notes"><label>How confident are you in this decision? <b>{confidence}/7</b><input aria-label="Decision confidence" type="range" min="1" max="7" value={confidence} onChange={e=>setConfidence(e.target.value)}/></label><label>Why this option? <span className="optional">Optional</span><textarea maxLength="500" value={rationale} onChange={e=>setRationale(e.target.value)} placeholder="Capture the trade-off or assumption behind your decision."/></label></div>{error&&<div className="error" role="alert">{error}</div>}<button className="primary" disabled={busy||!selected} onClick={submitDecision}>{busy?'Saving…':'Make decision'}</button></section>
-  <aside className="timeline"><h2>Project timeline</h2>{ROUND_NAMES.map((name,i)=><div className={`timeline-item ${i===run.round?'current':i<run.round?'done':''}`} key={name}><span>{i<run.round?'✓':i+1}</span><div><strong>{name}</strong><small>{['Proposal','Award & mobilisation','Months 3–8','Months 8–13','Months 13–19','Months 19–24+'][i]}</small></div></div>)}</aside></main>
-  {drawer&&<div className="overlay" onClick={()=>setDrawer(null)}><section className="drawer" role="dialog" aria-modal="true" aria-label={drawer.title} onClick={e=>e.stopPropagation()}><button className="close" onClick={()=>setDrawer(null)}>Close</button><p className="eyebrow">{drawer.type}</p><h2>{drawer.title}</h2><p>{drawer.purpose}</p><ul>{drawer.principles?.map(p=><li key={p}>{p}</li>)}</ul><div className="principle">Use this information to inform your judgement. The simulation does not reward opening more resources.</div></section></div>}
-  {reflectionPrompt&&<div className="overlay"><section className="modal" role="dialog" aria-modal="true"><p className="eyebrow">REFLECTION</p><h2>Before the project moves on…</h2><p className="reflection-question">{reflectionPrompt}</p><textarea autoFocus maxLength="800" value={reflectionText} onChange={e=>setReflectionText(e.target.value)} placeholder="What do you notice?"/><button className="primary" disabled={busy||reflectionText.trim().length<10} onClick={submitReflection}>Continue</button></section></div>}
-  {showProfile&&profileData&&<div className="overlay" onClick={()=>setShowProfile(false)}><section className="drawer profile" onClick={e=>e.stopPropagation()}><button className="close" onClick={()=>setShowProfile(false)}>Close</button><p className="eyebrow">DEVELOPMENTAL FEEDBACK</p><h2>{profileData.title}</h2><p className="muted">{profileData.disclaimer}</p><h3>Patterns emerging</h3>{profileData.repeated_patterns?.map(x=><p className="profile-point" key={x}>{x}</p>)}<h3>Developmental edge</h3>{profileData.developmental_edges?.map(x=><p className="profile-point" key={x}>{x}</p>)}<div className="principle"><strong>Consider:</strong> {profileData.adaptive_reflection}</div></section></div>}
+  function continueFromReason(){
+    if(!reasonId) return;
+    setPhase('reflection');
+  }
+
+  function saveReflection(){
+    const rec={decisionId:decision.id,optionId,reasonId,reflection,confidence:decision.confidence?Number(confidence):null,limitation:decision.limitation?limitation:null};
+    setRecords(prev=>[...prev.filter(r=>r.decisionId!==decision.id),rec]);
+    setPhase('feedback');
+  }
+
+  function nextDecision(){
+    if(index===DECISIONS.length-1){
+      setPhase('finalReflection');
+      return;
+    }
+    setIndex(i=>i+1);
+    resetDecision();
+    setPhase('decision');
+    window.scrollTo({top:0,behavior:'smooth'});
+  }
+
+  const profile=useMemo(()=>buildProfile(records,finalReflection),[records,finalReflection]);
+
+  if(!started){
+    return <main className="welcome">
+      <section className="welcome-card">
+        <p className="eyebrow">{SIMULATION_META.lab}</p>
+        <h1>{SIMULATION_META.title}</h1>
+        <p className="lede">{SIMULATION_META.subtitle}</p>
+        <p>Research questions often change as a study develops. New evidence may support an initial explanation, complicate it or show that the original question needs to be reconsidered.</p>
+        <div className="principle">
+          <strong>Approximate time:</strong> {SIMULATION_META.duration}<br/>
+          <strong>Format:</strong> Individual online simulation
+        </div>
+        <p>You will receive information in stages and make eight research decisions. At several points, you will be asked why you made a choice before seeing what can be learned from it.</p>
+        <p>There is no overall score. Your final Research Decision Profile reflects patterns across your decisions and reflections within this simulation.</p>
+        <button className="primary" onClick={()=>setStarted(true)}>Begin the simulation</button>
+      </section>
+    </main>;
+  }
+
+  if(phase==='finalReflection'){
+    return <div className="sim-shell">
+      <Header progress={100} label="Final reflection"/>
+      <main className="sim-main narrow">
+        <section className="card">
+          <p className="eyebrow">BEFORE YOU SEE YOUR PROFILE</p>
+          <h1>Looking across your decisions</h1>
+          <p>You have now made eight decisions about evidence, explanation, uncertainty and the development of the study. Consider the reasoning that guided them before reviewing the profile.</p>
+
+          <Question title="What were you most often trying to achieve?">
+            <div className="check-grid">
+              {FINAL_REFLECTION.priorities.map(p=><label key={p} className="check-option"><input type="checkbox" checked={finalReflection.priorities.includes(p)} onChange={e=>{
+                const next=e.target.checked?[...finalReflection.priorities,p]:finalReflection.priorities.filter(x=>x!==p);
+                if(next.length<=3)setFinalReflection(f=>({...f,priorities:next}));
+              }}/><span>{p}</span></label>)}
+            </div>
+          </Question>
+
+          <Question title="What was most likely to make you reconsider an explanation?">
+            <select value={finalReflection.reconsider} onChange={e=>setFinalReflection(f=>({...f,reconsider:e.target.value}))}>
+              <option value="">Select one</option>
+              {FINAL_REFLECTION.reconsider.map(x=><option key={x}>{x}</option>)}
+            </select>
+          </Question>
+
+          <Question title="Which decision did you find most difficult?">
+            <select value={finalReflection.difficult} onChange={e=>setFinalReflection(f=>({...f,difficult:e.target.value}))}>
+              <option value="">Select one</option>
+              {DECISIONS.map(d=><option key={d.id} value={d.id}>{d.label}: {d.title}</option>)}
+            </select>
+            <textarea placeholder="What made it difficult?" value={finalReflection.difficultWhy} onChange={e=>setFinalReflection(f=>({...f,difficultWhy:e.target.value}))}/>
+          </Question>
+
+          <Question title="Did you notice yourself returning to any particular consideration when making decisions?">
+            <textarea value={finalReflection.recurring} onChange={e=>setFinalReflection(f=>({...f,recurring:e.target.value}))}/>
+          </Question>
+
+          <Question title="Has the way you approached the research problem changed during the simulation?">
+            <select value={finalReflection.changed} onChange={e=>setFinalReflection(f=>({...f,changed:e.target.value}))}>
+              <option value="">Select one</option><option>Yes</option><option>No</option><option>I am not sure</option>
+            </select>
+            {finalReflection.changed&&<textarea placeholder={finalReflection.changed==='Yes'?'What changed?':finalReflection.changed==='No'?'What remained consistent?':'Is there a decision you would now approach differently?'} value={finalReflection.changedWhy} onChange={e=>setFinalReflection(f=>({...f,changedWhy:e.target.value}))}/>}
+          </Question>
+
+          <button className="primary" onClick={()=>setPhase('profile')}>See my Research Decision Profile</button>
+        </section>
+      </main>
+    </div>;
+  }
+
+  if(phase==='profile'){
+    return <div className="sim-shell">
+      <Header progress={100} label="Research Decision Profile"/>
+      <main className="sim-main narrow">
+        <section className="card profile-card">
+          <p className="eyebrow">YOUR RESEARCH DECISION PROFILE</p>
+          <h1>What your decisions suggest</h1>
+          <p className="muted">This profile reflects decisions you made in this simulation and the reasons you gave for them. It is intended to support reflection on your research practice. It is not an assessment of your overall ability as a researcher.</p>
+
+          <h2>What you tended to prioritise</h2>
+          {profile.priorities.map((p,i)=><p className="profile-point" key={i}>{p}</p>)}
+
+          {profile.strengths.length>0&&<>
+            <h2>Strengths visible across your decisions</h2>
+            {profile.strengths.map((s,i)=><div className="profile-section" key={i}><h3>{s.title}</h3><p>{s.text}</p></div>)}
+          </>}
+
+          {profile.developmentOverTime&&<>
+            <h2>How your approach developed</h2>
+            <p className="profile-point">{profile.developmentOverTime}</p>
+          </>}
+
+          {profile.development&&<>
+            <h2>Something you may want to consider</h2>
+            <p className="profile-point">{profile.development}</p>
+          </>}
+
+          <div className="principle"><strong>A question for your own research</strong><br/>{profile.finalQuestion}</div>
+
+          <h2>Apply this to your own research</h2>
+          <Question title="What do you currently think is happening?"><textarea value={finalReflection.ownResearch} onChange={e=>setFinalReflection(f=>({...f,ownResearch:e.target.value}))}/></Question>
+          <Question title="What evidence gives you confidence in that explanation?"><textarea value={finalReflection.supportingEvidence} onChange={e=>setFinalReflection(f=>({...f,supportingEvidence:e.target.value}))}/></Question>
+          <Question title="What evidence would make you reconsider it?"><textarea value={finalReflection.challengingEvidence} onChange={e=>setFinalReflection(f=>({...f,challengingEvidence:e.target.value}))}/></Question>
+          <Question title="Is there another plausible explanation that deserves more attention?"><textarea value={finalReflection.alternative} onChange={e=>setFinalReflection(f=>({...f,alternative:e.target.value}))}/></Question>
+          <Question title="Is a perspective or form of evidence currently missing?"><textarea value={finalReflection.missing} onChange={e=>setFinalReflection(f=>({...f,missing:e.target.value}))}/></Question>
+          <Question title="In the next two weeks, I will…"><textarea value={finalReflection.next} onChange={e=>setFinalReflection(f=>({...f,next:e.target.value}))}/></Question>
+
+          <div className="end-note">The purpose of the simulation is to make research decisions more visible so that you can examine the reasoning behind them and consider how similar decisions arise in your own work.</div>
+        </section>
+      </main>
+    </div>;
+  }
+
+  return <div className="sim-shell">
+    <Header progress={progress} label={decision.label}/>
+    <main className="sim-main">
+      <aside className="context-panel">
+        <p className="eyebrow">CURRENT STAGE</p>
+        <h2>{decision.stage}</h2>
+        <div className="decision-map">
+          {DECISIONS.map((d,i)=><div className={`map-row ${i===index?'current':i<index?'done':''}`} key={d.id}><span>{i<index?'✓':i+1}</span><small>{d.stage}</small></div>)}
+        </div>
+      </aside>
+
+      <section className="card decision-card">
+        {index===0&&<InitialContext/>}
+        <p className="eyebrow">{decision.evidenceTitle}</p>
+        <div className="evidence-block">{decision.evidence.map((p,i)=><p key={i}>{p}</p>)}</div>
+
+        {phase==='decision'&&<>
+          <div className="section-rule"/>
+          <p className="eyebrow">{decision.label}</p>
+          <h1>{decision.title}</h1>
+          <p className="prompt">{decision.prompt}</p>
+          <div className="options">
+            {decision.options.map(o=><button key={o.id} className={`option-card ${optionId===o.id?'selected':''}`} onClick={()=>chooseOption(o.id)}><span className="option-letter">{o.id.toUpperCase()}</span><span>{o.label}</span></button>)}
+          </div>
+          <button className="primary" disabled={!optionId} onClick={continueFromDecision}>Continue</button>
+        </>}
+
+        {phase==='reason'&&option&&<>
+          <div className="section-rule"/>
+          <p className="eyebrow">LOOKING BACK AT YOUR DECISION</p>
+          <h1>Why did you choose this approach?</h1>
+          <div className="selected-choice"><strong>Your decision</strong><p>{option.label}</p></div>
+          <p className="prompt">Choose the response that comes closest to your reasoning.</p>
+          <div className="reason-list">{option.reasons.map(r=><label className={`reason-option ${reasonId===r[0]?'selected':''}`} key={r[0]}><input type="radio" name="reason" checked={reasonId===r[0]} onChange={()=>setReasonId(r[0])}/><span>{r[1]}</span></label>)}</div>
+          <button className="primary" disabled={!reasonId} onClick={continueFromReason}>Continue</button>
+        </>}
+
+        {phase==='reflection'&&<>
+          <div className="section-rule"/>
+          <p className="eyebrow">REFLECTION</p>
+          <h1>Before you see what your decision suggests</h1>
+          <p className="prompt">{decision.reflection}</p>
+          <textarea className="large-textarea" value={reflection} onChange={e=>setReflection(e.target.value)} placeholder="Write a short response. This is for your reflection, not for assessment."/>
+
+          {decision.confidence&&<div className="confidence-block"><label>How confident are you in your current view? <strong>{confidence}/7</strong></label><input type="range" min="1" max="7" value={confidence} onChange={e=>setConfidence(e.target.value)}/></div>}
+
+          {decision.limitation&&<Question title="What is the most important limitation on the conclusion you selected?">
+            <select value={limitation} onChange={e=>setLimitation(e.target.value)}>
+              <option value="">Select one</option>
+              <option>The number of organisations.</option>
+              <option>Differences between the organisations.</option>
+              <option>Uncertainty about cause and effect.</option>
+              <option>Reliance on particular forms of evidence.</option>
+              <option>Possible alternative explanations.</option>
+              <option>Uncertainty about whether the findings apply elsewhere.</option>
+              <option>I do not think there is a major limitation.</option>
+            </select>
+          </Question>}
+
+          <button className="primary" onClick={saveReflection}>See what this decision suggests</button>
+        </>}
+
+        {phase==='feedback'&&feedback&&<>
+          <div className="section-rule"/>
+          <p className="eyebrow">{feedback.heading}</p>
+          <h1>{decision.title}</h1>
+          <div className="feedback-section"><h2>What your decision allows you to examine</h2><p>{feedback.value}</p></div>
+          <div className="feedback-section"><h2>Why your reason matters</h2><p>{feedback.reason}</p></div>
+          <div className="feedback-section"><h2>What to keep in mind</h2><p>{feedback.consider}</p></div>
+          <div className="transition-box"><strong>Moving forward</strong><p>{feedback.transition}</p></div>
+          <button className="primary" onClick={nextDecision}>{index===DECISIONS.length-1?'Continue to final reflection':'Continue to the next stage'}</button>
+        </>}
+      </section>
+
+      <aside className="research-note">
+        <p className="eyebrow">RESEARCH NOTE</p>
+        <p>The information is deliberately incomplete. Your task is to decide what the evidence allows you to do next, not to find a hidden correct answer.</p>
+      </aside>
+    </main>
   </div>;
 }
+
+function Header({progress,label}){
+  return <><header className="topbar"><div><p className="eyebrow">{SIMULATION_META.lab}</p><strong>{SIMULATION_META.title}</strong></div><div className="topmeta"><span>{label}</span><span>{SIMULATION_META.duration}</span></div></header><div className="progress"><div style={{width:`${progress}%`}}/></div></>;
+}
+
+function Question({title,children}){
+  return <div className="question-block"><label>{title}</label>{children}</div>;
+}
+
+function InitialContext(){
+  return <section className="initial-context">
+    <p className="eyebrow">{INITIAL_CONTEXT.heading}</p>
+    {INITIAL_CONTEXT.paragraphs.map((p,i)=><p key={i}>{p}</p>)}
+    <div className="comparison-table">
+      <div className="tr head"><div></div><div>Northbridge</div><div>Westford</div></div>
+      {INITIAL_CONTEXT.comparison.map((r,i)=><div className="tr" key={i}><div>{r[0]}</div><div>{r[1]}</div><div>{r[2]}</div></div>)}
+    </div>
+    <p className="note">{INITIAL_CONTEXT.note}</p>
+  </section>;
+}
+
 export default App;
