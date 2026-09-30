@@ -11,7 +11,7 @@ function App(){
   const [error,setError]=useState('');
   const [serverProfile,setServerProfile]=useState(null);
   const [index,setIndex]=useState(saved?.index||0);
-  const [phase,setPhase]=useState('decision');
+  const [phase,setPhase]=useState(saved?.phase||'decision');
   const [optionId,setOptionId]=useState('');
   const [reasonId,setReasonId]=useState('');
   const [reflection,setReflection]=useState('');
@@ -28,8 +28,8 @@ function App(){
   const progress=started?Math.round((index/DECISIONS.length)*100):0;
 
   useEffect(()=>{
-    localStorage.setItem('research_puzzle_progress',JSON.stringify({started,index,records,finalReflection,runId}));
-  },[started,index,records,finalReflection,runId]);
+    localStorage.setItem('research_puzzle_progress',JSON.stringify({started,index,phase,records,finalReflection,runId}));
+  },[started,index,phase,records,finalReflection,runId]);
 
   useEffect(()=>{
     if(!PUZZLE_BACKEND_ENABLED||!runId) return;
@@ -38,8 +38,19 @@ function App(){
       try{
         const remote=normalizeRemoteState(await getPuzzleRun(runId));
         if(cancelled) return;
-        if(remote.records.length>=records.length){setRecords(remote.records);setIndex(Math.min(remote.index,DECISIONS.length-1));}
-        if(remote.finalReflection&&Object.keys(remote.finalReflection).length){setFinalReflection(f=>({...f,...remote.finalReflection}));}
+        if(remote.records.length>=records.length) setRecords(remote.records);
+        if(remote.finalReflection&&Object.keys(remote.finalReflection).length) setFinalReflection(f=>({...f,...remote.finalReflection}));
+        if(remote.status==='active'){
+          setIndex(Math.min(remote.index,DECISIONS.length-1));
+          setPhase('decision');
+        }else if(remote.status==='awaiting_final_reflection'){
+          setIndex(DECISIONS.length-1);
+          setPhase('finalReflection');
+        }else if(remote.status==='profile_ready'||remote.status==='completed'){
+          setIndex(DECISIONS.length-1);
+          setServerProfile(await getPuzzleProfile(runId));
+          setPhase('profile');
+        }
       }catch(e){if(!cancelled)setError(`Could not restore the secure session: ${e.message}`);}
     })();
     return ()=>{cancelled=true;};
