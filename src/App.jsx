@@ -41,8 +41,23 @@ function App(){
         if(remote.records.length>=records.length) setRecords(remote.records);
         if(remote.finalReflection&&Object.keys(remote.finalReflection).length) setFinalReflection(f=>({...f,...remote.finalReflection}));
         if(remote.status==='active'){
-          setIndex(Math.min(remote.index,DECISIONS.length-1));
-          setPhase('decision');
+          const savedRecordCount=saved?.records?.length||0;
+          const remoteRecordCount=remote.records.length;
+          const localFeedbackPending=saved?.phase==='feedback' && savedRecordCount===remoteRecordCount && saved?.index===Math.max(remote.index-1,0);
+          if(localFeedbackPending){
+            const last=remote.records[remoteRecordCount-1];
+            setIndex(saved.index);
+            setOptionId(last?.optionId||'');
+            setReasonId(last?.reasonId||'');
+            setCustomReason(last?.customReason||'');
+            setReflection(last?.reflection||'');
+            setConfidence(last?.confidence??4);
+            setLimitation(last?.limitation||'');
+            setPhase('feedback');
+          }else{
+            setIndex(Math.min(remote.index,DECISIONS.length-1));
+            setPhase('decision');
+          }
         }else if(remote.status==='awaiting_final_reflection'){
           setIndex(DECISIONS.length-1);
           setPhase('finalReflection');
